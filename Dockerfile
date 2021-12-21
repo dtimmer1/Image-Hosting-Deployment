@@ -11,6 +11,7 @@ COPY *.go ./
 COPY /html/ /html/
 COPY /static/ /static/
 
+RUN mkdir /static/img/
 RUN go build -o /test-server
 
 FROM alpine:latest

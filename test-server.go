@@ -112,19 +112,8 @@ func main() {
 
 	imgs = make(map[string]string)
 
-	e.GET("/hello/:name", func(c echo.Context) error {
-		name := c.Param("name")
-		return c.Render(http.StatusOK, "hello.html", map[string]interface{}{"hello": name})
-	})
-
 	e.GET("/", func(c echo.Context) error {
-		return c.File("/html/img.html")
-	})
-
-	e.POST("/ping", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, struct {
-			Status string `json:"status"`
-		}{Status: "ok"})
+		return c.Render(http.StatusOK, "img.html", map[string]interface{}{})
 	})
 
 	e.POST("/send", func(c echo.Context) error {
@@ -144,7 +133,7 @@ func main() {
 		return c.String(http.StatusOK, link)
 	})
 
-	e.GET("/:link", writeImageAndServe)
+	e.GET("/img/:link", writeImageAndServe)
 
 	e.Logger.Fatal(e.Start(":8080"))
 }

@@ -24,7 +24,7 @@ window.addEventListener('load', function(){
                 httpPost.onreadystatechange = function(err) {
                     if (httpPost.readyState == 4 && httpPost.status == 200){
                         console.log(httpPost.responseText);
-                        var url = `http://localhost:8080/${httpPost.responseText}`
+                        var url = `http://localhost:8080/img/${httpPost.responseText}`
                         document.getElementById("link").href = url
                         document.getElementById("thankyou").style = "display: block;"
 

@@ -1,26 +1,16 @@
 package main
 
 import (
-	"bytes"
-	"crypto/sha1"
-	"encoding/base64"
 	"encoding/json"
 	"html/template"
-	"image"
-	"image/gif"
-	"image/jpeg"
-	"image/png"
 	"io"
 	"log"
 	"net/http"
-	"os"
-	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
-
-var imgs map[string]string
 
 type TemplateRenderer struct {
 	templates *template.Template
@@ -30,87 +20,25 @@ func (t *TemplateRenderer) Render(w io.Writer, name string, data interface{}, c 
 	return t.templates.ExecuteTemplate(w, name, data)
 }
 
-func writeImageAndServe(c echo.Context) error {
-	img, ok := imgs[c.Param("link")]
-
-	if !ok {
-		return c.Render(http.StatusNotFound, "notfound.html", map[string]interface{}{})
-	}
-
-	idx := strings.Index(img, ",")
-
-	decoded, err := base64.StdEncoding.DecodeString(img[idx+1:])
-
-	if err != nil {
-		log.Println(err)
-		return c.Render(http.StatusNotFound, "notfound.html", map[string]interface{}{})
-	}
-
-	image, format, err := image.Decode(bytes.NewReader(decoded))
-
-	if err != nil {
-		log.Println(err)
-		return c.Render(http.StatusNotFound, "notfound.html", map[string]interface{}{})
-	}
-
-	filename := "./static/img/" + c.Param("link") + "." + format
-
-	_, err = os.Open(filename) //check if file already exists
-
-	if err == nil { //file found
-		return c.File(filename)
-	}
-
-	f, err := os.Create(filename)
-
-	if err != nil {
-		log.Println(err)
-		log.Println("ducky")
-		return c.Render(http.StatusNotFound, "notfound.html", map[string]interface{}{})
-	}
-
-	switch format {
-	case "jpeg":
-		err = jpeg.Encode(f, image, nil)
-	case "jpg":
-		err = jpeg.Encode(f, image, nil)
-	case "png":
-		err = png.Encode(f, image)
-	case "gif":
-		err = gif.Encode(f, image, nil)
-	}
-
-	if err != nil {
-		log.Println(err)
-		return c.Render(http.StatusNotFound, "notfound.html", map[string]interface{}{})
-	}
-
-	f.Close()
-
-	return c.File(filename)
-}
-
 func main() {
 	e := echo.New()
 
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 
-	funcMap := template.FuncMap{
-		"safe": func(s string) template.URL {
-			return template.URL(s)
-		},
-	}
-
 	t := &TemplateRenderer{
-		templates: template.Must(template.New("").Funcs(funcMap).ParseGlob("html/*.html")),
+		templates: template.Must(template.New("").ParseGlob("html/*.html")),
 	}
 
 	e.Renderer = t
 
 	e.Static("/", "static")
 
-	imgs = make(map[string]string)
+	qh := NewQueryHandler()
+
+	go qh.Launch()
+
+	defer qh.Quit()
 
 	e.GET("/", func(c echo.Context) error {
 		return c.Render(http.StatusOK, "img.html", map[string]interface{}{})
@@ -123,17 +51,38 @@ func main() {
 		}
 		decoder := json.NewDecoder(body)
 		decoder.Decode(&data)
-		hasher := sha1.New()
-		hasher.Write([]byte(data.Image))
-		encoding := base64.StdEncoding.EncodeToString(hasher.Sum(nil))
-		link := strings.ReplaceAll(encoding, "/", "")[:10]
 
-		imgs[link] = data.Image
+		eventRequest := make(chan string)
 
-		return c.String(http.StatusOK, link)
+		qh.SendEvent(Event{ImageUploadEvent, data.Image, eventRequest})
+
+		var output string
+
+		select {
+		case output = <-eventRequest:
+			return c.String(http.StatusOK, output)
+		case <-time.After(time.Duration(time.Second * 5)):
+			return c.String(http.StatusInternalServerError, "server timed out")
+		}
 	})
 
-	e.GET("/img/:link", writeImageAndServe)
+	e.GET("/img/:link", func(c echo.Context) error {
+		log.Println(c.Param("link"))
+		eventRequest := make(chan string)
+
+		qh.SendEvent(Event{ImageRequestEvent, c.Param("link"), eventRequest})
+
+		select {
+		case output := <-eventRequest:
+			if output != "" {
+				return c.File(output)
+			} else {
+				return c.File("html/notfound.html")
+			}
+		case <-time.After(time.Duration(time.Second * 5)):
+			return c.File("html/notfound.html")
+		}
+	})
 
 	e.Logger.Fatal(e.Start(":8080"))
 }
